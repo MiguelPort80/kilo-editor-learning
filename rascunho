@@ -1,5 +1,0 @@
-$(gcc) é uma variavél que define o compilador usado pelo make
-
--Wall - significa All Warinings, que faz com que o compilador nos avise sobre práticas ruins de código e coisas que eventualmente podem dar errado
--Wextra -pedantic - colocam ainda mais warnings
--std=c99 - informa que o padrão da linguagem C usado é o c99.

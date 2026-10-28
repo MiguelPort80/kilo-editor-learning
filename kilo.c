@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <termios.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -12,6 +13,7 @@
 //ele basicamente pega qualquer tecla que você apertar e transforma em código de controle correspondente ao apertar <ctrl + k ou qlqr outra tecla>
 #define CTRL_KEY(k) ((k) & 0x1f)
 
+#define KILO_VERSION "0.0.1"
 
 
 
@@ -24,9 +26,35 @@ struct editorConfig{
 
 struct editorConfig E;
 
+/* APPEND BUFFER */
+//o append buffer vai servir de ponteiro para o nosso buffer na memoria e o tamanho dele
+struct abuf {
+	char *b;
+	int len;
+};
+//representa um buffer vazio
+//ler rascunho [5]
+#define ABUF_INIT {NULL, 0};
+
+void abAppend(struct abuf *ab, const char *s, int len){
+	//basicamente aqui estamos redimensionando o tamanho do buffer para aumentar seu tamanho, a sintaxe ab->b é que estamos acessando a variavel b através
+	//de um ponteiro. a função realloc recebe um buffer e o tamanho novo.
+	char *new = realloc(ab->b, ab->len + len);
+
+	if(new == NULL) return;
+	//memcpy (memory copy) copia n bytes de um endereço de memoria x até um destino y, abaixo estamos copiando o que está em s para o new e o len é a quantidade de bytes
+	memcpy(&new[ab->len], s, len);
+	ab->b = new;
+	ab->len += len;
+}
+
+void abFree(struct abuf *ab){
+	free(ab->b);
+}
 //função que imprime um erro e fecha o programa
 //ler rascunho [4]
 void die(const char *s){
+	//Estamos limpando a tela mas com o comando \x1b[2J 
 	write(STDOUT_FILENO, "\x1b[2J", 4);
 	write(STDOUT_FILENO, "\x1b[H", 3);
 	perror(s);
@@ -79,7 +107,7 @@ char editorReadKey(){
 	return c;
 }
 
-
+//função que coloca o seu cursor no canto inferior direito para calcular o tamanho do terminal
 int getCursorPosition(int *rows, int *cols){
 	char buf[32];
 	unsigned int i = 0;
@@ -88,7 +116,6 @@ int getCursorPosition(int *rows, int *cols){
   		return -1; 
 
 	printf("\r\n");
-	char c;
 
 	while(i < sizeof(buf) - 1){
 		if(read(STDIN_FILENO, &buf[i], 1) != 1) 
@@ -101,18 +128,22 @@ int getCursorPosition(int *rows, int *cols){
 	}
 
 	buf[i] = '\0';
+	//verificamos se a string impressa começa com uma escape sequence
+	if(buf[0] != '\x1b' || buf[1] != '[') 
+		return -1;
+	//sscanf é uma função de escanear e formatar strings, no caso vamos ler a partir do terceiro caracter e ler a parte que corresponde ao formato %d;%d
+	//e colocar esses valores nas variáveis rows e cols
+	if(sscanf(&buf[2], "%d;%d", rows, cols) != 2)
+		return -1;
 
-	printf("\r\nbuf[i]: '%s'\r\n", &buf[1]);
-
-	editorReadKey();
 	
-	return -1;
+	return 0;
 }
 
 int getWindowSize(int *rows, int *cols){
 	struct winsize ws;
 	//usamos a função ioctl pra retornar o tamanho da tela do terminal usando o parametro TIOCGWINSZ(Terminal Input Output Control Get Windows Size)
-	if(1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0){
+	if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0){
 
 		if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12)
 			return -1;
@@ -127,20 +158,39 @@ int getWindowSize(int *rows, int *cols){
 }
 /* OUTPUT */
 //Função para imprimir o char '~' no começo de cada linha igual no vim
-void editorDrawRows(){
+void editorDrawRows(struct abuf *ab){
 	int y;
 	for(y = 0; y < E.screenrows; y++) {
-		write(STDOUT_FILENO, "~\r\n", 3);
+		if(y == E.screenrows / 3){
+			char welcome[80];
+			int welcomelen = snprintf(welcome, sizeof(welcome),"Kilo editor -- version %s", KILO_VERSION);
+			if(welcomelen > E.screencols) welcomelen = E.screencols;
+		    abAppend(ab, welcome, welcomelen);
+		}else {
+			abAppend(ab, "~", 1);
+		}
+		//comando para limpar uma linha por vez na tela
+		abAppend(ab, "\x1b[K", 3);
+		if(y < E.screenrows - 1){
+			abAppend(ab, "\r\n", 2);
+		}
 	}
 }
 
 void editorRefreshScreen() {
-	//basicamente estamos escrevendo um comando para limpar a tela do terminal é isso que a sequencia \x1b[2J faz 
-	write(STDOUT_FILENO, "\x1b[2J", 4);
-	write(STDOUT_FILENO, "\x1b[H", 3);
+	struct abuf ab = ABUF_INIT;
 
-	editorDrawRows();
-	write(STDOUT_FILENO, "\x1b[H", 3);
+	//comando para esconder o cursor
+	abAppend(&ab, "\x1b[?25l", 6);	
+	abAppend(&ab, "\x1b[H", 3);
+
+	editorDrawRows(&ab);
+
+	abAppend(&ab, "\x1b[H", 3);
+	abAppend(&ab, "\x1b[?25h", 6);	
+	
+	write(STDOUT_FILENO,ab.b , ab.len);
+	abFree(&ab);
 }
 
 

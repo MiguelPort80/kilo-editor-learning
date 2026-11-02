@@ -45,7 +45,7 @@ struct editorConfig{
 	int screenrows;
 	int screencols;
 	int numrows;
-	erow row;
+	erow *row;
 	struct termios org_termios;
 };
 
@@ -223,7 +223,21 @@ int getWindowSize(int *rows, int *cols){
 		return 0;
 	}
 }
+/* operações de row */
+//I REMEMBER HALLOWEEN HALLOWEEEEN HALLOWEEEEEN
+//basicamente essa função pega uma string e aloca ela no nosso row do editor usando memcpy
+void editorAppendRow(char *s, size_t len){
+	//E.row agora vai ser um array de linhas(rows) que iremos mostrar no editor
+	E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
 
+	int at = E.numrows;
+
+	E.row[at].size = len;
+	E.row[at].chars = malloc(len + 1);
+	memcpy(E.row[at].chars, s, len);
+	E.row[at].chars[len] = '\0';
+	E.numrows++;
+}
 /* FILE I/O */
 
 //função para abrir e ler o conteudo de um arquivo
@@ -238,18 +252,13 @@ void editorOpen(char *filename){
 	//getline le uma linha do arquivo e retorna o tamanho dela
 	linelen = getline(&line, &linecap, fp);
 	
-	if(linelen != -1){
+	while((linelen = getline(&line, &linecap, fp)) != -1){
 		while(linelen > 0 && (line[linelen - 1] == '\n' ||
 								line[linelen -1] == '\r'))
 			linelen--;
 	
 
-
-		E.row.size = linelen;
-		E.row.chars = malloc(linelen + 1);
-		memcpy(E.row.chars, line, linelen);
-		E.row.chars[linelen] = '\0';
-		E.numrows = 1;
+		editorAppendRow(line, linelen);
 	}
 	free(line);
 	fclose(fp);
@@ -279,9 +288,10 @@ void editorDrawRows(struct abuf *ab){
 				abAppend(ab, "~", 1);
 			}
 		}else{
-			int len = E.row.size;
+			//imprime linhas no editor
+			int len = E.row[y].size;
 			if (len > E.screencols) len = E.screencols;
-			abAppend(ab, E.row.chars, len);
+			abAppend(ab, E.row[y].chars, len);
 		}
 			//comando para limpar uma linha por vez na tela
 			abAppend(ab, "\x1b[K", 3);
@@ -385,6 +395,7 @@ void initEditor(){
 	E.cursorX = 0;
 	E.cursorY = 0;
 	E.numrows = 0;
+	E.row = NULL;
 
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");

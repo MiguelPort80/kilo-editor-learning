@@ -1,4 +1,9 @@
 /* INCLUDES */
+//defines caso o compilador reclame do uso de getline()
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
@@ -26,6 +31,12 @@ enum editorKey{
 	PAGE_DOWN
 };
 
+//struct para armazenar as linhas que o editor vai ler
+typedef struct erow{
+	int size;
+	char *chars;
+} erow;
+
 
 //Atributos do terminal podem ser lidos e modificados usando a struct termios
 struct editorConfig{
@@ -33,10 +44,13 @@ struct editorConfig{
 	int cursorX, cursorY;
 	int screenrows;
 	int screencols;
+	int numrows;
+	erow row;
 	struct termios org_termios;
 };
 
 struct editorConfig E;
+
 
 /* APPEND BUFFER */
 //o append buffer vai servir de ponteiro para o nosso buffer na memoria e o tamanho dele
@@ -209,35 +223,75 @@ int getWindowSize(int *rows, int *cols){
 		return 0;
 	}
 }
+
+/* FILE I/O */
+
+//função para abrir e ler o conteudo de um arquivo
+void editorOpen(char *filename){
+	FILE *fp = fopen(filename, "r");
+	//isso é igual a if(fp == NULL)
+	if(!fp) die("fopen");
+
+	char *line = NULL;
+	size_t linecap = 0;
+	ssize_t linelen;
+	//getline le uma linha do arquivo e retorna o tamanho dela
+	linelen = getline(&line, &linecap, fp);
+	
+	if(linelen != -1){
+		while(linelen > 0 && (line[linelen - 1] == '\n' ||
+								line[linelen -1] == '\r'))
+			linelen--;
+	
+
+
+		E.row.size = linelen;
+		E.row.chars = malloc(linelen + 1);
+		memcpy(E.row.chars, line, linelen);
+		E.row.chars[linelen] = '\0';
+		E.numrows = 1;
+	}
+	free(line);
+	fclose(fp);
+}	
+
 /* OUTPUT */
 //Função para imprimir o char '~' no começo de cada linha igual no vim
 void editorDrawRows(struct abuf *ab){
 	int y;
 	for(y = 0; y < E.screenrows; y++) {
-		if(y == E.screenrows / 3){
-			char welcome[80];
-			int welcomelen = snprintf(welcome, sizeof(welcome),"Kilo editor -- version %s", KILO_VERSION);
-			if(welcomelen > E.screencols) welcomelen = E.screencols;
-			//para centralizar uma string dividimos a tela por dois e subtraimos a metade do tamanho das strings a partir do valor da tela
-			int padding = (E.screencols - welcomelen) / 2;
-			if(padding) {
+		if(y >= E.numrows){
+			if(E.numrows == 0 && y == E.screenrows / 3){
+				char welcome[80];
+				int welcomelen = snprintf(welcome, sizeof(welcome),"Kilo editor -- version %s", KILO_VERSION);
+				if(welcomelen > E.screencols) welcomelen = E.screencols;
+				//para centralizar uma string dividimos a tela por dois e subtraimos a metade do tamanho das strings a partir do valor da tela
+				int padding = (E.screencols - welcomelen) / 2;
+				if(padding) {
+					abAppend(ab, "~", 1);
+					padding--;
+				}
+				//uma das linhas de código já escritas
+				//estamos preenchendo os espaços que faltam para ficar centralizado com strings vazias
+				while (padding--) abAppend(ab, " ", 1);
+				abAppend(ab, welcome, welcomelen);
+			}else {
 				abAppend(ab, "~", 1);
-				padding--;
 			}
-			//uma das linhas de código já escritas
-			//estamos preenchendo os espaços que faltam para ficar centralizado com strings vazias
-			while (padding--) abAppend(ab, " ", 1);
-			abAppend(ab, welcome, welcomelen);
-		}else {
-			abAppend(ab, "~", 1);
+		}else{
+			int len = E.row.size;
+			if (len > E.screencols) len = E.screencols;
+			abAppend(ab, E.row.chars, len);
 		}
-		//comando para limpar uma linha por vez na tela
-		abAppend(ab, "\x1b[K", 3);
-		if(y < E.screenrows - 1){
-			abAppend(ab, "\r\n", 2);
+			//comando para limpar uma linha por vez na tela
+			abAppend(ab, "\x1b[K", 3);
+			if(y < E.screenrows - 1){
+				abAppend(ab, "\r\n", 2);
+			}
 		}
 	}
-}
+
+
 
 void editorRefreshScreen() {
 	struct abuf ab = ABUF_INIT;
@@ -330,15 +384,19 @@ void editorProcessKeypress(){
 void initEditor(){
 	E.cursorX = 0;
 	E.cursorY = 0;
+	E.numrows = 0;
 
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
 }
 
 
-int main(){
+int main(int argc, char *argv[]){
 	enableRawMode();
 	initEditor();
+	if(argc >= 2){
+		editorOpen(argv[1]);
+	}
 	while(1){
 		editorRefreshScreen();
 		editorProcessKeypress();

@@ -1,5 +1,5 @@
 /* INCLUDES */
-//defines caso o compilador reclame do uso de getline()
+//defines caso o compilador reclame do uso de getline() o gcc reclamou btw
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _GNU_SOURCE
@@ -42,6 +42,8 @@ typedef struct erow{
 struct editorConfig{
 	// X é a coordenada horizontal e Y é a coordenada vertical
 	int cursorX, cursorY;
+	int rowoff;
+	int coloff;
 	int screenrows;
 	int screencols;
 	int numrows;
@@ -265,11 +267,32 @@ void editorOpen(char *filename){
 }	
 
 /* OUTPUT */
+
+void editorScroll(){
+	//checa se o cursor está acima da tela visível e se estiver sobe a tela também
+	if(E.cursorY < E.rowoff){
+		E.rowoff = E.cursorY;
+	}
+	//checa se o cursos está abaixo da tela visível e se estiver desce a tela
+	if(E.cursorY >= E.rowoff + E.screenrows){
+		E.rowoff = E.cursorY - E.screenrows + 1;
+	}
+
+	if(E.cursorX < E.coloff){
+		E.coloff = E.cursorX;
+	}
+
+	if(E.cursorX >= E.coloff + E.screencols){
+		E.coloff = E.cursorX - E.screencols + 1;
+	}
+}
+
 //Função para imprimir o char '~' no começo de cada linha igual no vim
 void editorDrawRows(struct abuf *ab){
 	int y;
 	for(y = 0; y < E.screenrows; y++) {
-		if(y >= E.numrows){
+		int filerow = y + E.rowoff;
+		if(filerow >= E.numrows){
 			if(E.numrows == 0 && y == E.screenrows / 3){
 				char welcome[80];
 				int welcomelen = snprintf(welcome, sizeof(welcome),"Kilo editor -- version %s", KILO_VERSION);
@@ -288,10 +311,11 @@ void editorDrawRows(struct abuf *ab){
 				abAppend(ab, "~", 1);
 			}
 		}else{
-			//imprime linhas no editor
-			int len = E.row[y].size;
+			//imprime as linhas no editor
+			int len = E.row[filerow].size - E.coloff;
+			if (len < 0) len = 0;
 			if (len > E.screencols) len = E.screencols;
-			abAppend(ab, E.row[y].chars, len);
+			abAppend(ab, &E.row[filerow].chars[E.coloff], len);
 		}
 			//comando para limpar uma linha por vez na tela
 			abAppend(ab, "\x1b[K", 3);
@@ -304,6 +328,7 @@ void editorDrawRows(struct abuf *ab){
 
 
 void editorRefreshScreen() {
+	editorScroll();
 	struct abuf ab = ABUF_INIT;
 
 	//comando para esconder o cursor
@@ -315,7 +340,7 @@ void editorRefreshScreen() {
 	//Movemos o cursor para o canto superior esquerdo da tela
 	char buf[32];
 	//usamos o comando H e especificamos a posição que queremos que o cursor vá usando %d
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cursorY + 1, E.cursorX + 1);
+	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cursorY - E.rowoff) + 1, (E.cursorX - E.coloff) + 1);
 	abAppend(&ab, buf, strlen(buf));
 
 
@@ -329,15 +354,29 @@ void editorRefreshScreen() {
 
 /* INPUT */
 void editorMoveCursor(int key){
+	//faz com que o cursor não passe da linha 
+	erow *row = (E.cursorY >= E.numrows) ? NULL : &E.row[E.cursorY];
+
+
 	switch(key){
 		case ARROW_LEFT:
 			if(E.cursorX != 0){
 				E.cursorX--;
+			}else if(E.cursorY > 0){
+				//faz com que se você apertar para esquerda no começo da linha o cursor vai para linha anterior. (vou tirar isso dps XP)
+				E.cursorY--;
+				E.cursorX = E.row[E.cursorY].size;
 			}
 			break;
 		case ARROW_RIGHT:
-			if(E.cursorX != E.screencols - 1 ){
+			//verifica se o cursor está num local seja maior que a linha
+			if(row && E.cursorX < row->size){
 				E.cursorX++;
+			}else if(row && E.cursorX == row->size){
+				//faz com que se você apertar para direita no final da linha o cursor vai para a proxima linha.
+				//
+				E.cursorY++;
+				E.cursorX = 0;
 			}
 			break;
 		case ARROW_UP:
@@ -346,11 +385,18 @@ void editorMoveCursor(int key){
 			}
 			break;
 		case ARROW_DOWN:
-			if(E.cursorY != E.screenrows -1 ) {
+			if(E.cursorY != E.numrows) {
 				E.cursorY++;
 			}
 		break;
 	}
+	//corrige caso o cursor esteja em uma posição em uma linha e na outra essa posição seja inacessível, fazendo com que ele pule para o final da proxima linha
+	row = (E.cursorY >= E.numrows) ? NULL : &E.row[E.cursorY];
+	int rowlen = row ? row->size : 0;
+	if(E.cursorX > rowlen){
+		E.cursorX = rowlen;
+	}
+
 }
 
 void editorProcessKeypress(){
@@ -391,10 +437,12 @@ void editorProcessKeypress(){
 }
 
 /* INIT */
-void initEditor(){
-	E.cursorX = 0;
+void initEditor(){ 
+	E.cursorX = 0; 
 	E.cursorY = 0;
+	E.coloff = 0;
 	E.numrows = 0;
+	E.rowoff = 0;
 	E.row = NULL;
 
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1)

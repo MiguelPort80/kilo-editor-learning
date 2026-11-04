@@ -14,6 +14,8 @@
 #include <ctype.h>
 
 #define KILO_VERSION "0.0.1"
+#define KILO_TAB_STOP 8
+
 //CTRL_KEY é uma função macro que pega um argumento k (que normalmente é um caractere)
 //o (k) & 0x1f pelo que eu entendi, pega o valor de ASCII do k e faz uma operação de bitwise AND com o valor 0x1f
 //ele basicamente pega qualquer tecla que você apertar e transforma em código de controle correspondente ao apertar <ctrl + k ou qlqr outra tecla>
@@ -34,7 +36,9 @@ enum editorKey{
 //struct para armazenar as linhas que o editor vai ler
 typedef struct erow{
 	int size;
+	int rsize;
 	char *chars;
+	char *render;
 } erow;
 
 
@@ -42,6 +46,7 @@ typedef struct erow{
 struct editorConfig{
 	// X é a coordenada horizontal e Y é a coordenada vertical
 	int cursorX, cursorY;
+	int renderX;
 	int rowoff;
 	int coloff;
 	int screenrows;
@@ -226,6 +231,44 @@ int getWindowSize(int *rows, int *cols){
 	}
 }
 /* operações de row */
+//função que tranforma cursorX em renderX
+int editorRowCxToRx(erow *row, int cx){
+	int rx = 0;
+	int j;
+	
+	for(j = 0; j < cx; j++){
+		if(row->chars[j] == '\t')
+			rx += (KILO_TAB_STOP - 1) - ( rx % KILO_TAB_STOP);
+		rx++;
+	}
+	return rx;
+}
+
+
+//função para copiar cada caracter do chars para o render
+void editorUpdateRow(erow *row){
+	int tabs = 0;
+	int j;
+	//contém o número de caracteres que copiamos de render
+	int idx = 0;
+	for(j = 0; j < row->size; j++)
+		if(row->chars[j] == '\t') tabs++;
+
+	free(row->render);
+	row->render = malloc(row->size + tabs*(KILO_TAB_STOP-1) + 1);
+
+	for(j = 0; j < row->size; j++){
+		if(row->chars[j] == '\t'){
+			row->render[idx++] = ' ';
+			while(idx % KILO_TAB_STOP != 0) row->render[idx++] = ' ';
+		} else {
+			row->render[idx++] = row->chars[j];
+		}
+	}
+	row->render[idx] = '\0';
+	row->rsize = idx;
+}
+
 //I REMEMBER HALLOWEEN HALLOWEEEEN HALLOWEEEEEN
 //basicamente essa função pega uma string e aloca ela no nosso row do editor usando memcpy
 void editorAppendRow(char *s, size_t len){
@@ -238,6 +281,12 @@ void editorAppendRow(char *s, size_t len){
 	E.row[at].chars = malloc(len + 1);
 	memcpy(E.row[at].chars, s, len);
 	E.row[at].chars[len] = '\0';
+
+	//inicialização do render
+	E.row[at].rsize = 0;
+    E.row[at].render = NULL;	
+	editorUpdateRow(&E.row[at]);
+
 	E.numrows++;
 }
 /* FILE I/O */
@@ -252,7 +301,7 @@ void editorOpen(char *filename){
 	size_t linecap = 0;
 	ssize_t linelen;
 	//getline le uma linha do arquivo e retorna o tamanho dela
-	linelen = getline(&line, &linecap, fp);
+	//linelen = getline(&line, &linecap, fp);
 	
 	while((linelen = getline(&line, &linecap, fp)) != -1){
 		while(linelen > 0 && (line[linelen - 1] == '\n' ||
@@ -269,6 +318,11 @@ void editorOpen(char *filename){
 /* OUTPUT */
 
 void editorScroll(){
+	E.renderX = 0;
+	if(E.cursorY < E.numrows){
+		E.renderX = editorRowCxToRx(&E.row[E.cursorY], E.cursorX);
+	}
+
 	//checa se o cursor está acima da tela visível e se estiver sobe a tela também
 	if(E.cursorY < E.rowoff){
 		E.rowoff = E.cursorY;
@@ -278,12 +332,12 @@ void editorScroll(){
 		E.rowoff = E.cursorY - E.screenrows + 1;
 	}
 
-	if(E.cursorX < E.coloff){
-		E.coloff = E.cursorX;
+	if(E.renderX< E.coloff){
+		E.coloff = E.renderX;
 	}
 
-	if(E.cursorX >= E.coloff + E.screencols){
-		E.coloff = E.cursorX - E.screencols + 1;
+	if(E.renderX >= E.coloff + E.screencols){
+		E.coloff = E.renderX - E.screencols + 1;
 	}
 }
 
@@ -293,12 +347,14 @@ void editorDrawRows(struct abuf *ab){
 	for(y = 0; y < E.screenrows; y++) {
 		int filerow = y + E.rowoff;
 		if(filerow >= E.numrows){
+			//imprime a mensagem de welcome
 			if(E.numrows == 0 && y == E.screenrows / 3){
 				char welcome[80];
 				int welcomelen = snprintf(welcome, sizeof(welcome),"Kilo editor -- version %s", KILO_VERSION);
 				if(welcomelen > E.screencols) welcomelen = E.screencols;
 				//para centralizar uma string dividimos a tela por dois e subtraimos a metade do tamanho das strings a partir do valor da tela
 				int padding = (E.screencols - welcomelen) / 2;
+				//imprime o caracter ~ igual no vim
 				if(padding) {
 					abAppend(ab, "~", 1);
 					padding--;
@@ -312,10 +368,10 @@ void editorDrawRows(struct abuf *ab){
 			}
 		}else{
 			//imprime as linhas no editor
-			int len = E.row[filerow].size - E.coloff;
+			int len = E.row[filerow].rsize - E.coloff;
 			if (len < 0) len = 0;
 			if (len > E.screencols) len = E.screencols;
-			abAppend(ab, &E.row[filerow].chars[E.coloff], len);
+			abAppend(ab, &E.row[filerow].render[E.coloff], len);
 		}
 			//comando para limpar uma linha por vez na tela
 			abAppend(ab, "\x1b[K", 3);
@@ -340,7 +396,7 @@ void editorRefreshScreen() {
 	//Movemos o cursor para o canto superior esquerdo da tela
 	char buf[32];
 	//usamos o comando H e especificamos a posição que queremos que o cursor vá usando %d
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cursorY - E.rowoff) + 1, (E.cursorX - E.coloff) + 1);
+	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cursorY - E.rowoff) + 1, (E.renderX - E.coloff) + 1);
 	abAppend(&ab, buf, strlen(buf));
 
 
@@ -414,16 +470,22 @@ void editorProcessKeypress(){
 			break;
 
 		case END_KEY:
-			E.cursorX = E.screencols - 1;
+			if(E.cursorY < E.numrows)
+				E.cursorX = E.row[E.cursorY].size;
 			break;
 
 		case PAGE_UP:
 		case PAGE_DOWN:
 			{
-				int times = E.screenrows;
-				while(times--){
-					editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
+				if(c == PAGE_UP) {
+					E.cursorY = E.rowoff;
+				} else if(c == PAGE_DOWN) {
+					E.cursorY = E.rowoff + E.screenrows - 1;
+					if(E.cursorY > E.numrows) E.cursorY = E.numrows;
 				}
+				int times = E.screenrows;
+				while(times--)
+					editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
 			}
 			break;
 
@@ -440,6 +502,7 @@ void editorProcessKeypress(){
 void initEditor(){ 
 	E.cursorX = 0; 
 	E.cursorY = 0;
+	E.renderX = 0;
 	E.coloff = 0;
 	E.numrows = 0;
 	E.rowoff = 0;

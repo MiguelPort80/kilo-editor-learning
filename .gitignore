@@ -41,12 +41,14 @@ tags
 *.i*86
 *.x86_64
 *.hex
+kilo
 
 # Debug files
 *.dSYM/
 *.su
 *.idb
 *.pdb
+tags
 
 # Kernel Module Compile Results
 *.mod*

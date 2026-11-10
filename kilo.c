@@ -12,11 +12,13 @@
 #include <sys/ioctl.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <ctype.h>
 #include <time.h>
 
 #define KILO_VERSION "0.0.1"
 #define KILO_TAB_STOP 8
+#define KILO_QUIT_TIMES 3 
 
 //CTRL_KEY é uma função macro que pega um argumento k (que normalmente é um caractere)
 //o (k) & 0x1f pelo que eu entendi, pega o valor de ASCII do k e faz uma operação de bitwise AND com o valor 0x1f
@@ -56,6 +58,7 @@ struct editorConfig{
 	int screencols;
 	int numrows;
 	erow *row;
+	int dirty;
 	char *filename;
 	char statusmsg[80];
 	time_t statusmsg_time;
@@ -64,6 +67,9 @@ struct editorConfig{
 
 struct editorConfig E;
 
+/* PROTOTIPOS */
+
+void editorSetStatusMessage(const char *fmt, ...);
 
 /* APPEND BUFFER */
 //o append buffer vai servir de ponteiro para o nosso buffer na memoria e o tamanho dele
@@ -94,6 +100,8 @@ void abFree(struct abuf *ab){
 //ler rascunho [4]
 void die(const char *s){
 	//Estamos limpando a tela mas com o comando \x1b[2J 
+	//escreve uma quantidade de bytes em um arquivo ou stream
+	//ssize_t write(int fd, const void buf[.count], size_t count);
 	write(STDOUT_FILENO, "\x1b[2J", 4);
 	write(STDOUT_FILENO, "\x1b[H", 3);
 	perror(s);
@@ -294,6 +302,7 @@ void editorAppendRow(char *s, size_t len){
 	editorUpdateRow(&E.row[at]);
 
 	E.numrows++;
+	E.dirty++;
 }
 //função que vai inserir um caracter em uma linha especifica
 void editorRowInsertChar(erow *row, int at, int c){
@@ -304,6 +313,17 @@ void editorRowInsertChar(erow *row, int at, int c){
 	row->size++;
 	row->chars[at] = c;
 	editorUpdateRow(row);
+	E.dirty++;
+}
+
+//função que vai remover um caracter em uma linha especifica
+void editorRowDelChar(erow *row, int at){
+	if(at < 0 || at >= row->size) return;
+	//substitui o caractere deletado pelos caracteres na frente
+	memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+	row->size--;
+	editorUpdateRow(row);
+	E.dirty++;
 }
 
 /* OPERAÇÕES DE EDITOR */
@@ -316,6 +336,15 @@ void editorInsertChar(int c){
 	E.cursorX++;
 }
 
+void editorDeleteChar(){
+	if(E.cursorY == E.numrows) return;
+
+	erow *row = &E.row[e.cursorY];
+	if(E.cursorX > 0) {
+		editorRowDelChar(row, E.cursorX - 1);
+		E.cursorX--;
+	}
+}
 /* FILE I/O */
 
 //função para converter os arrays do erow para string para então poder salvar com outra funçãoj
@@ -366,7 +395,34 @@ void editorOpen(char *filename){
 	}
 	free(line);
 	fclose(fp);
+	E.dirty = 0;
 }	
+
+void editorSave(){
+	//se o arquivo não existir ainda vamos criar ele
+	if(E.filename == NULL) return;
+
+	int len;
+	char *buf = editorRowsToString(&len);
+	//flag O_RDWR(read and write), O_CREAT(cria o arquivo se ele não existir), 0644 é a permisão para o arquivo sendo esse um padrão comum
+	int fd = open(E.filename, O_RDWR | O_CREAT, 0644);
+	if(fd != -1){
+		//define um tamanho específico para o arquivo, se ele for maior do que esse tamanho cortaremos o conteudo extra fora, se for menor preencheremos com 0
+		if(ftruncate(fd, len) != -1){
+			if(write(fd,buf,len) == len){
+				close(fd);
+				free(buf);	
+				E.dirty = 0;
+				editorSetStatusMessage("%d bytes written to disk", len);
+				return;
+			}
+		}
+		close(fd);
+	}
+	free(buf);
+	//strerror pega o errno e formata para uma string que possa ser lida por um humano, errno é uma variavel que armazena informações de erro do sistema
+	editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
+}
 
 /* OUTPUT */
 
@@ -437,7 +493,10 @@ void editorDrawStatusBar(struct abuf *ab){
 	//comando que inverte a cor do terminal
 	abAppend(ab, "\x1b[7m", 4);
 	char status[80], rstatus[80];
-	int len = snprintf(status, sizeof(status), "%.20s - %d lines", E.filename ? E.filename : "[No name]", E.numrows);
+	int len = snprintf(status, sizeof(status), "%.20s - %d lines %s", 
+			E.filename ? E.filename : "[No Name]", 
+			E.numrows, E.dirty ? "(modified)" : "");
+
 	int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", E.cursorY + 1, E.numrows);
 	if(len > E.screencols) len = E.screencols;
 	abAppend(ab,status,len);	
@@ -547,6 +606,9 @@ void editorMoveCursor(int key){
 }
 
 void editorProcessKeypress(){
+	//variáveis estáticas escapam do escopo da função e duram o programa todo
+	static int quit_times = KILO_QUIT_TIMES;
+
 	int c = editorReadKey();
 
 	switch(c) {
@@ -556,9 +618,19 @@ void editorProcessKeypress(){
 
 
 		case CTRL_KEY('q'):
+			if(E.dirty && quit_times > 0){
+				editorSetStatusMessage("WARNING!!! File has unsaved changes. "
+						"Press Ctrl-Q %d more times to quit", quit_times);
+				quit_times--;
+				return;
+			}
 			write(STDOUT_FILENO, "\x1b[2J", 4);
 			write(STDOUT_FILENO, "\x1b[H", 3);
 			exit(0);
+			break;
+
+		case CTRL_KEY('s'):
+			editorSave();
 			break;
 
 		case HOME_KEY:
@@ -606,6 +678,8 @@ void editorProcessKeypress(){
 			editorInsertChar(c);
 			break;
 	}
+
+	quit_times = KILO_QUIT_TIMES;
 }
 
 /* INIT */
@@ -620,6 +694,7 @@ void initEditor(){
 	E.filename = NULL;
 	E.statusmsg[0] = '\0';
 	E.statusmsg_time = 0;
+	E.dirty = 0;
 
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
@@ -634,7 +709,7 @@ int main(int argc, char *argv[]){
 	if(argc >= 2){
 		editorOpen(argv[1]);
 	}
-	editorSetStatusMessage("HELP: Ctrl-Q = quit");
+	editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit");
 
 	while(1){
 		editorRefreshScreen();

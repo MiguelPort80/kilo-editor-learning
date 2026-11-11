@@ -69,6 +69,8 @@ struct editorConfig E;
 /* PROTOTIPOS */
 
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen();
+char *editorPrompt(char *prompt);
 
 /* APPEND BUFFER */
 //o append buffer vai servir de ponteiro para o nosso buffer na memoria e o tamanho dele
@@ -453,7 +455,13 @@ void editorOpen(char *filename){
 
 void editorSave(){
 	//se o arquivo não existir ainda vamos criar ele
-	if(E.filename == NULL) return;
+	if(E.filename == NULL) {
+		E.filename = editorPrompt("Save as: %s (ESC TO CANCEL)");
+		if(E.filename == NULL){
+			editorSetStatusMessage("Save aborted");
+			return;	
+		}
+	}
 
 	int len;
 	char *buf = editorRowsToString(&len);
@@ -612,6 +620,49 @@ void editorSetStatusMessage(const char *fmt, ...){
 
 
 /* INPUT */
+char *editorPrompt(char *prompt){
+	//input do usuário
+	size_t bufsize = 128;
+	char *buf = malloc(bufsize);
+	
+	size_t buflen = 0;
+	buf[0] = '\0';
+	
+	while(1){
+		editorSetStatusMessage(prompt, buf);
+		editorRefreshScreen();
+
+		int c = editorReadKey();
+		//deleta um caractere no promp
+		if(c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE){
+			if(buflen != 0) buf[--buflen] = '\0';
+		}else if(c == '\x1b'){
+			//verifica se o usuario pressionou esc, e com isso sai do prompt
+			editorSetStatusMessage("");
+			free(buf);
+			return NULL;
+		} else if(c == '\r'){
+			if(buflen != 0){
+				editorSetStatusMessage("");
+				return buf;
+			}
+			//verifica se o c é um caracter de comando, se não for executamos o resto
+		} else if (!iscntrl(c) && c < 128){
+			//verica se o buflen chegou na sua capacidade maxima
+			if(buflen == bufsize - 1){
+				//dobramos o tamanho do buffer
+				bufsize *= 2;
+				buf = realloc(buf, bufsize);
+			}
+			
+			buf[buflen++] = c;
+			buf[buflen] = '\0';
+		}
+	}
+	
+}
+
+
 void editorMoveCursor(int key){
 	//faz com que o cursor não passe da linha 
 	erow *row = (E.cursorY >= E.numrows) ? NULL : &E.row[E.cursorY];

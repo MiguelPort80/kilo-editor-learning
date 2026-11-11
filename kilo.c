@@ -15,7 +15,6 @@
 #include <fcntl.h>
 #include <ctype.h>
 #include <time.h>
-
 #define KILO_VERSION "0.0.1"
 #define KILO_TAB_STOP 8
 #define KILO_QUIT_TIMES 3 
@@ -244,7 +243,7 @@ int getWindowSize(int *rows, int *cols){
 		return 0;
 	}
 }
-/* operações de row */
+/* OPERAÇÕES DE ROW*/
 //função que tranforma cursorX em renderX
 int editorRowCxToRx(erow *row, int cx){
 	int rx = 0;
@@ -285,11 +284,15 @@ void editorUpdateRow(erow *row){
 
 //I REMEMBER HALLOWEEN HALLOWEEEEN HALLOWEEEEEN
 //basicamente essa função pega uma string e aloca ela no nosso row do editor usando memcpy
-void editorAppendRow(char *s, size_t len){
+void editorInsertRow(int at, char *s, size_t len){
+	if(at < 0 || at > E.numrows) return;
 	//E.row agora vai ser um array de linhas(rows) que iremos mostrar no editor
+	//alocamos espaço de memória para mais uma linha
 	E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+	//copiamos um espaço de memória para a nova linha
+	memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at) );
 
-	int at = E.numrows;
+
 
 	E.row[at].size = len;
 	E.row[at].chars = malloc(len + 1);
@@ -326,24 +329,74 @@ void editorRowDelChar(erow *row, int at){
 	E.dirty++;
 }
 
+void editorFreeRow(erow* row){
+	free(row->render);
+	free(row->chars);
+}
+
+void editorDeleteRow(int at){
+	if(at < 0 || at >= E.numrows) return;
+	editorFreeRow(&E.row[at]);
+	memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1) );
+	E.numrows--;
+	E.dirty++;
+}
+
+//Função que anexa uma string ao final de uma linha.
+void editorRowAppendString(erow *row, char *s, size_t len){
+	row->chars = realloc(row->chars, row->size + len + 1);
+	memcpy(&row->chars[row->size], s, len);
+	row->size += len; 
+	row->chars[row->size] = '\0';
+	editorUpdateRow(row);
+	E.dirty++;
+}
+
 /* OPERAÇÕES DE EDITOR */
 
 void editorInsertChar(int c){
 	if(E.cursorY == E.numrows){
-		editorAppendRow("",0);
+		editorInsertRow(E.numrows,"",0);
 	}
 	editorRowInsertChar(&E.row[E.cursorY], E.cursorX, c);
 	E.cursorX++;
 }
 
+void editorInsertNewLine(){
+	//se o cursor estiver no começo de uma linha, ele insere uma linha em branco na linha atual e joga o conteudo para baixo
+	if(E.cursorX == 0){
+		editorInsertRow(E.cursorY, "", 0);
+	} else{
+		erow *row = &E.row[E.cursorY];
+		//cria uma nova linha abaixo
+		editorInsertRow(E.cursorY + 1, &row->chars[E.cursorX], row->size - E.cursorX);
+		//atualiza o ponteiro da linha pois, com o realloc da função editorInserRow o endereço pode ter mudado
+		row = &E.row[E.cursorY];
+		//corta o tamanho da string para ela terminar exatamente aonde o cursor estava
+		row->size = E.cursorX;
+		row->chars[row->size] = '\0';
+		editorUpdateRow(row);
+	}
+	E.cursorY++;
+	E.cursorX = 0;
+}
+
 void editorDeleteChar(){
 	if(E.cursorY == E.numrows) return;
+	if(E.cursorX == 0 && E.cursorY == 0) return;
 
-	erow *row = &E.row[e.cursorY];
+
+	erow *row = &E.row[E.cursorY];
 	if(E.cursorX > 0) {
 		editorRowDelChar(row, E.cursorX - 1);
 		E.cursorX--;
+	}else {
+		E.cursorX = E.row[E.cursorY - 1].size;
+		editorRowAppendString(&E.row[E.cursorY - 1], row->chars, row->size);
+		editorDeleteRow(E.cursorY);
+		E.cursorY--;
 	}
+
 }
 /* FILE I/O */
 
@@ -391,7 +444,7 @@ void editorOpen(char *filename){
 			linelen--;
 	
 
-		editorAppendRow(line, linelen);
+		editorInsertRow(E.numrows, line, linelen);
 	}
 	free(line);
 	fclose(fp);
@@ -612,8 +665,9 @@ void editorProcessKeypress(){
 	int c = editorReadKey();
 
 	switch(c) {
+		//tecla enter
 		case '\r':
-			/*TODO*/
+			editorInsertNewLine();
 			break;
 
 
@@ -645,7 +699,8 @@ void editorProcessKeypress(){
 		case BACKSPACE:
 		case CTRL_KEY('h'):
 		case DEL_KEY:
-			/* TODO*/
+			if(c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);
+			editorDeleteChar();
 			break;
 		
 		case PAGE_UP:

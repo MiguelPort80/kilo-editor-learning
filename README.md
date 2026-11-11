@@ -5,6 +5,8 @@ Esse é um projeto feito com base no tutorial https://viewsourcecode.org/snaptok
 
 Pretendo assim que acabar o tutorial implementar minhas próprias funcionalidades para adequar ele ao meu workflow.
 
+Conclui todas as operações básicas que fazem o editor ser funcional. 
+
 ---
 
 (^_^)`📝

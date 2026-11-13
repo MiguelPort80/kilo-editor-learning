@@ -65,6 +65,7 @@ struct editorConfig{
 };
 
 struct editorConfig E;
+int mode = 0; //NORMAL MODE 0 | INSERT MODE 1
 
 /* PROTOTIPOS */
 
@@ -259,7 +260,20 @@ int editorRowCxToRx(erow *row, int cx){
 	return rx;
 }
 
+//função que tranforma renderX em cursorX
+int editorRowRxToCx(erow *row, int rx){
+	int cur_rx = 0; 
+	int cursorX;
 
+	for(cursorX = 0; cursorX < row->size; cursorX++){
+		if(row->chars[cursorX] == '\t')
+			cur_rx += (KILO_TAB_STOP - 1) - (cur_rx % KILO_TAB_STOP);
+		cur_rx++;
+
+		if(cur_rx > rx) return cursorX;
+	}
+	return cursorX;
+}
 //função para copiar cada caracter do chars para o render
 void editorUpdateRow(erow *row){
 	int tabs = 0;
@@ -484,6 +498,30 @@ void editorSave(){
 	//strerror pega o errno e formata para uma string que possa ser lida por um humano, errno é uma variavel que armazena informações de erro do sistema
 	editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
+
+/* FIND */
+
+//função que implementa search
+void editorFind(){
+	char *query = editorPrompt("Search: %s (ESC TO CANCEL)");
+	if (query == NULL) return;
+
+	int i;
+	for(i = 0; i < E.numrows; i++){
+		erow *row = &E.row[i];
+		//verifica se query está numa linha | retorna nulo se o padrão não bater
+		//char *strstr(const char *haystack, const char *needle);
+		char *match = strstr(row->render, query);
+		if(match){
+			E.cursorY = i;
+			E.cursorX = editorRowRxToCx(row, match - row->render);
+			E.rowoff = E.numrows;
+			break;
+		}
+	}
+	free(query);
+}
+
 
 /* OUTPUT */
 
@@ -747,6 +785,10 @@ void editorProcessKeypress(){
 				E.cursorX = E.row[E.cursorY].size;
 			break;
 
+
+		case CTRL_KEY('f'):
+			editorFind();
+			break;
 		case BACKSPACE:
 		case CTRL_KEY('h'):
 		case DEL_KEY:
@@ -815,7 +857,7 @@ int main(int argc, char *argv[]){
 	if(argc >= 2){
 		editorOpen(argv[1]);
 	}
-	editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit");
+	editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = search");
 
 	while(1){
 		editorRefreshScreen();

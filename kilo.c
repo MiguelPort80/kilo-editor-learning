@@ -34,7 +34,15 @@ enum editorKey{
 	HOME_KEY,
 	END_KEY,
 	PAGE_UP,
-	PAGE_DOWN
+	PAGE_DOWN,
+	ESC_KEY
+};
+
+enum motionKeys{
+	MOTIONKEY_H = 104,
+	MOTIONKEY_J = 106,
+	MOTIONKEY_K = 107,
+	MOTIONKEY_L = 108	
 };
 
 //struct para armazenar as linhas que o editor vai ler
@@ -65,6 +73,7 @@ struct editorConfig{
 };
 
 struct editorConfig E;
+//Colocando os modos do vim
 int mode = 0; //NORMAL MODE 0 | INSERT MODE 1
 
 /* PROTOTIPOS */
@@ -707,6 +716,7 @@ void editorMoveCursor(int key){
 
 
 	switch(key){
+		case MOTIONKEY_H:
 		case ARROW_LEFT:
 			if(E.cursorX != 0){
 				E.cursorX--;
@@ -716,6 +726,7 @@ void editorMoveCursor(int key){
 				E.cursorX = E.row[E.cursorY].size;
 			}
 			break;
+		case MOTIONKEY_L:
 		case ARROW_RIGHT:
 			//verifica se o cursor está num local seja maior que a linha
 			if(row && E.cursorX < row->size){
@@ -727,11 +738,13 @@ void editorMoveCursor(int key){
 				E.cursorX = 0;
 			}
 			break;
+		case MOTIONKEY_K:
 		case ARROW_UP:
 			if(E.cursorY != 0){
 				E.cursorY--;
 			}
 			break;
+		case MOTIONKEY_J:
 		case ARROW_DOWN:
 			if(E.cursorY != E.numrows) {
 				E.cursorY++;
@@ -752,81 +765,161 @@ void editorProcessKeypress(){
 	static int quit_times = KILO_QUIT_TIMES;
 
 	int c = editorReadKey();
-
-	switch(c) {
-		//tecla enter
-		case '\r':
-			editorInsertNewLine();
-			break;
-
-
-		case CTRL_KEY('q'):
-			if(E.dirty && quit_times > 0){
-				editorSetStatusMessage("WARNING!!! File has unsaved changes. "
-						"Press Ctrl-Q %d more times to quit", quit_times);
-				quit_times--;
-				return;
-			}
-			write(STDOUT_FILENO, "\x1b[2J", 4);
-			write(STDOUT_FILENO, "\x1b[H", 3);
-			exit(0);
-			break;
-
-		case CTRL_KEY('s'):
-			editorSave();
-			break;
-
-		case HOME_KEY:
-			E.cursorX = 0;
-			break;
-
-		case END_KEY:
-			if(E.cursorY < E.numrows)
-				E.cursorX = E.row[E.cursorY].size;
-			break;
+	//MODO INSERT
+	if(mode == 1){
+		char *displayMode = (mode) ? "[--INSERT--]" : "[--NORMAL--]";
+		editorSetStatusMessage(displayMode);
+		switch(c) {
+			//tecla enter
+			case '\r':
+				editorInsertNewLine();
+				break;
 
 
-		case CTRL_KEY('f'):
-			editorFind();
-			break;
-		case BACKSPACE:
-		case CTRL_KEY('h'):
-		case DEL_KEY:
-			if(c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);
-			editorDeleteChar();
-			break;
-		
-		case PAGE_UP:
-		case PAGE_DOWN:
-			{
-				if(c == PAGE_UP) {
-					E.cursorY = E.rowoff;
-				} else if(c == PAGE_DOWN) {
-					E.cursorY = E.rowoff + E.screenrows - 1;
-					if(E.cursorY > E.numrows) E.cursorY = E.numrows;
+			case CTRL_KEY('q'):
+				if(E.dirty && quit_times > 0){
+					editorSetStatusMessage("WARNING!!! File has unsaved changes. "
+							"Press Ctrl-Q %d more times to quit", quit_times);
+					quit_times--;
+					return;
 				}
-				int times = E.screenrows;
-				while(times--)
-					editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
-			}
+				write(STDOUT_FILENO, "\x1b[2J", 4);
+				write(STDOUT_FILENO, "\x1b[H", 3);
+				exit(0);
+				break;
+
+			case CTRL_KEY('s'):
+				editorSave();
+				break;
+
+			case HOME_KEY:
+				E.cursorX = 0;
+				break;
+
+			case END_KEY:
+				if(E.cursorY < E.numrows)
+					E.cursorX = E.row[E.cursorY].size;
+				break;
+
+
+			case CTRL_KEY('f'):
+				editorFind();
+			break;
+			case BACKSPACE:
+			case CTRL_KEY('h'):
+			case DEL_KEY:
+				if(c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);
+				editorDeleteChar();
+				break;
+			
+			case PAGE_UP:
+			case PAGE_DOWN:
+				{
+					if(c == PAGE_UP) {
+						E.cursorY = E.rowoff;
+					} else if(c == PAGE_DOWN) {
+						E.cursorY = E.rowoff + E.screenrows - 1;
+						if(E.cursorY > E.numrows) E.cursorY = E.numrows;
+					}
+					int times = E.screenrows;
+					while(times--)
+						editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
+				}
+				break;
+
+			case ARROW_UP:
+			case ARROW_DOWN:
+			case ARROW_LEFT:
+			case ARROW_RIGHT:
+				editorMoveCursor(c);
+				break;
+
+			case CTRL_KEY('l'):
+			case '\x1b':
+				mode = 0;
+				break;
+
+			default:
+				editorInsertChar(c);
+				break;
+		}
+	//MODO NORMAL	
+	}else{
+		char *displayMode = (mode) ? "[--INSERT--]" : "[--NORMAL--]";
+		editorSetStatusMessage(displayMode);
+		switch(c){
+			//tecla enter
+			case '\r':
+				editorInsertNewLine();
+				break;
+
+
+			case CTRL_KEY('q'):
+				if(E.dirty && quit_times > 0){
+					editorSetStatusMessage("WARNING!!! File has unsaved changes. "
+							"Press Ctrl-Q %d more times to quit", quit_times);
+					quit_times--;
+					return;
+				}
+				write(STDOUT_FILENO, "\x1b[2J", 4);
+				write(STDOUT_FILENO, "\x1b[H", 3);
+				exit(0);
+				break;
+
+			case CTRL_KEY('s'):
+				editorSave();
+				break;
+
+			case HOME_KEY:
+				E.cursorX = 0;
+				break;
+
+			case END_KEY:
+				if(E.cursorY < E.numrows)
+					E.cursorX = E.row[E.cursorY].size;
+				break;
+
+
+			case CTRL_KEY('f'):
+				editorFind();
 			break;
 
-		case ARROW_UP:
-		case ARROW_DOWN:
-		case ARROW_LEFT:
-		case ARROW_RIGHT:
-			editorMoveCursor(c);
-			break;
+			case PAGE_UP:
+			case PAGE_DOWN:
+				{
+					if(c == PAGE_UP) {
+						E.cursorY = E.rowoff;
+					} else if(c == PAGE_DOWN) {
+						E.cursorY = E.rowoff + E.screenrows - 1;
+						if(E.cursorY > E.numrows) E.cursorY = E.numrows;
+					}
+					int times = E.screenrows;
+					while(times--)
+						editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
+				}
+				break;
 
-		case CTRL_KEY('l'):
-		case '\x1b':
-			break;
+			case ARROW_UP:
+			case ARROW_DOWN:
+			case ARROW_LEFT:
+			case ARROW_RIGHT:
+				editorMoveCursor(c);
+				break;
 
-		default:
-			editorInsertChar(c);
-			break;
+			case MOTIONKEY_K:
+			case MOTIONKEY_J:
+			case MOTIONKEY_H:
+			case MOTIONKEY_L:
+				editorMoveCursor(c);
+				break;
+
+
+			case CTRL_KEY('l'):
+			case '\x1b':
+				break;
+		}	
 	}
-
+	if(c == 105) mode = 1;
 	quit_times = KILO_QUIT_TIMES;
 }
 
@@ -857,7 +950,8 @@ int main(int argc, char *argv[]){
 	if(argc >= 2){
 		editorOpen(argv[1]);
 	}
-	editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = search");
+	char *displayMode = (mode) ? "[--INSERT--]" : "[--NORMAL--]";
+	editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = search | %s", displayMode);
 
 	while(1){
 		editorRefreshScreen();

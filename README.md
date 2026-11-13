@@ -7,6 +7,8 @@ Pretendo assim que acabar o tutorial implementar minhas próprias funcionalidade
 
 Conclui todas as operações básicas que fazem o editor ser funcional. 
 
+Adicionei os vim motions básicos de navegação(h/j/k/l).
+
 ---
 
 (^_^)`📝

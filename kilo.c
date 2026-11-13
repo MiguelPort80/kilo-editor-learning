@@ -80,7 +80,7 @@ int mode = 0; //NORMAL MODE 0 | INSERT MODE 1
 
 void editorSetStatusMessage(const char *fmt, ...);
 void editorRefreshScreen();
-char *editorPrompt(char *prompt);
+char *editorPrompt(char *prompt, void(*callback)(char *, int));
 
 /* APPEND BUFFER */
 //o append buffer vai servir de ponteiro para o nosso buffer na memoria e o tamanho dele
@@ -479,7 +479,7 @@ void editorOpen(char *filename){
 void editorSave(){
 	//se o arquivo não existir ainda vamos criar ele
 	if(E.filename == NULL) {
-		E.filename = editorPrompt("Save as: %s (ESC TO CANCEL)");
+		E.filename = editorPrompt("Save as: %s (ESC TO CANCEL)", NULL);
 		if(E.filename == NULL){
 			editorSetStatusMessage("Save aborted");
 			return;	
@@ -511,24 +511,67 @@ void editorSave(){
 /* FIND */
 
 //função que implementa search
-void editorFind(){
-	char *query = editorPrompt("Search: %s (ESC TO CANCEL)");
-	if (query == NULL) return;
+void editorFindCallback(char *query, int key){
+	//por padrão o ultimo match vai ser -1
+	static int last_match = -1;
+	static int direction = 1;
+	//sempre faremos a pesquisa para frente, a não ser que o usuário queira voltar
+	if(key == '\r' || key == '\x1b'){
+		last_match = -1;
+		direction = 1;
+		return;
+	}else if(key == ARROW_RIGHT || key == ARROW_DOWN){
+		direction = 1;
+	}else if(key == ARROW_LEFT || key == ARROW_UP){
+		direction = -1;
+	}else{
+		last_match = -1;
+		direction = 1;
+	}
 
+
+	if(last_match == -1) direction = 1;
+	//current vai ser o index da linha que estamos procurando
+	int current = last_match;
 	int i;
 	for(i = 0; i < E.numrows; i++){
-		erow *row = &E.row[i];
+		current += direction;
+		//faz com que o current chegar no final do arquivo ele volte para o começo e viceversa
+		if(current == -1) current = E.numrows - 1;
+		else if (current == E.numrows) current = 0;
+
+		erow *row = &E.row[current];
 		//verifica se query está numa linha | retorna nulo se o padrão não bater
 		//char *strstr(const char *haystack, const char *needle);
 		char *match = strstr(row->render, query);
 		if(match){
-			E.cursorY = i;
+			last_match = current;
+			E.cursorY = current;
 			E.cursorX = editorRowRxToCx(row, match - row->render);
 			E.rowoff = E.numrows;
 			break;
 		}
 	}
-	free(query);
+}
+//a função foi divida em dois para termos incremental search.
+void editorFind(){
+	int saved_cursorX = E.cursorX;
+	int saved_cursorY = E.cursorY;
+	int saved_coloff = E.coloff;
+	int saved_rowoff = E.rowoff;
+
+	char *query = editorPrompt("Search: %s (ESC/ARROWS/ENTER)", editorFindCallback);
+	if(query){	
+		free(query);
+	}else{
+		//restaurando a posição original do cursor quando não achamos a pesquisa;
+		E.cursorX = saved_cursorX;
+		E.cursorY = saved_cursorY;
+		E.coloff = saved_coloff;
+		E.rowoff = saved_rowoff;
+	}
+
+	
 }
 
 
@@ -667,7 +710,8 @@ void editorSetStatusMessage(const char *fmt, ...){
 
 
 /* INPUT */
-char *editorPrompt(char *prompt){
+//passando um ponteiro de função como parametro
+char *editorPrompt(char *prompt, void (*callback)(char *, int)){
 	//input do usuário
 	size_t bufsize = 128;
 	char *buf = malloc(bufsize);
@@ -686,11 +730,13 @@ char *editorPrompt(char *prompt){
 		}else if(c == '\x1b'){
 			//verifica se o usuario pressionou esc, e com isso sai do prompt
 			editorSetStatusMessage("");
+			if (callback) callback(buf,c);
 			free(buf);
 			return NULL;
 		} else if(c == '\r'){
 			if(buflen != 0){
 				editorSetStatusMessage("");
+				if (callback) callback(buf,c);
 				return buf;
 			}
 			//verifica se o c é um caracter de comando, se não for executamos o resto
@@ -705,6 +751,9 @@ char *editorPrompt(char *prompt){
 			buf[buflen++] = c;
 			buf[buflen] = '\0';
 		}
+
+
+		if (callback) callback(buf,c);
 	}
 	
 }
